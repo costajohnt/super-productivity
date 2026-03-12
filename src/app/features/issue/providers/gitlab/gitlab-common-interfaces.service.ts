@@ -113,9 +113,11 @@ export class GitlabCommonInterfacesService extends BaseIssueProviderService<Gitl
       issueUpdate > (task.issueLastUpdated || 0);
 
     if (wasUpdated) {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { dueDay, ...taskChangesWithoutDueDay } = this.getAddTaskData(issue);
       return {
         taskChanges: {
-          ...this.getAddTaskData(issue),
+          ...taskChangesWithoutDueDay,
           issueWasUpdated: true,
         },
         issue,
