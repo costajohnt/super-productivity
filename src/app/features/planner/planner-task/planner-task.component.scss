@@ -106,6 +106,7 @@ done-toggle {
   line-height: 1.5;
   position: relative;
   overflow: hidden;
+  word-break: break-word;
   flex-grow: 1;
   flex-shrink: 1;
 
@@ -120,6 +121,7 @@ done-toggle {
   padding-top: var(--s-half);
   padding-bottom: var(--s-half);
   overflow: hidden;
+  word-break: break-word;
   line-height: 1.1;
   font-size: var(--planner-font-size-smaller-mobile);
 
