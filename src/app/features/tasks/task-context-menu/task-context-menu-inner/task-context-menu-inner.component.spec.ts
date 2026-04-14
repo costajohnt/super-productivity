@@ -197,8 +197,8 @@ describe('TaskContextMenuInnerComponent', () => {
     }));
   });
 
-  describe('CSS.escape in querySelector', () => {
-    it('should use CSS.escape for task ID in focusRelatedTaskOrNext', fakeAsync(() => {
+  describe('getElementById for task ID lookup', () => {
+    it('should use getElementById for task ID in focusRelatedTaskOrNext', fakeAsync(() => {
       component.task = {
         id: 'task-with-{special}-chars',
         title: 'Test',
@@ -207,12 +207,12 @@ describe('TaskContextMenuInnerComponent', () => {
         subTaskIds: [],
       } as any;
 
-      const cssEscapeSpy = spyOn(CSS, 'escape').and.callThrough();
+      const getByIdSpy = spyOn(document, 'getElementById').and.returnValue(null);
 
       component.focusRelatedTaskOrNext();
       tick(100);
 
-      expect(cssEscapeSpy).toHaveBeenCalledWith('task-with-{special}-chars');
+      expect(getByIdSpy).toHaveBeenCalledWith('t-task-with-{special}-chars');
     }));
   });
 });
