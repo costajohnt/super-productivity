@@ -28,11 +28,13 @@ import {
 import {
   DUPLICATE_OPERATION_ERROR_MSG,
   OPERATION_LOG_STORE_NOT_INITIALIZED,
+  isLockRelatedIdbOpenError,
 } from './op-log-errors.const';
 import { runDbUpgrade } from './db-upgrade';
 import { Log } from '../../core/log';
 import {
   IDB_OPEN_RETRIES,
+  IDB_OPEN_RETRIES_NON_LOCK,
   IDB_OPEN_RETRY_BASE_DELAY_MS,
 } from '../core/operation-log.const';
 import { IndexedDBOpenError } from '../core/errors/indexed-db-open.error';
@@ -200,17 +202,28 @@ export class OperationLogStoreService {
    * Opens IndexedDB with retry logic and exponential backoff.
    * Transient failures (file locks, temporary I/O issues) may resolve on retry.
    *
-   * Total attempts = 1 initial + IDB_OPEN_RETRIES retries.
-   * With IDB_OPEN_RETRIES=5 and base delay 1000ms: attempts at 0ms, 1s, 3s, 7s, 15s, 31s (~31s total window).
+   * The retry budget depends on the error:
+   * - Lock-related errors (InvalidStateError, "backing store"): use the full
+   *   IDB_OPEN_RETRIES window (~31s) to outlast stale LevelDB locks from a
+   *   previous session. See issue #7191.
+   * - Other errors: fall back to IDB_OPEN_RETRIES_NON_LOCK. `_ensureInit()` is
+   *   awaited by every op-log read/write and the hydrator auto-reloads on
+   *   failure, so waiting ~31s on a non-lock error would create a
+   *   reload->wait->reload loop that feels like a hang.
    *
    * @throws IndexedDBOpenError if all retry attempts fail
    * @see https://github.com/johannesjo/super-productivity/issues/6255
+   * @see https://github.com/super-productivity/super-productivity/issues/7191
    */
   private async _openDbWithRetry(): Promise<IDBPDatabase<OpLogDB>> {
-    const totalAttempts = 1 + IDB_OPEN_RETRIES;
+    let maxRetries = IDB_OPEN_RETRIES;
+    let attempt = 1;
     let lastError: unknown;
 
-    for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+    // Loop until either openDB succeeds or we exhaust the retry budget for the
+    // observed error class. `maxRetries` may shrink after the first failure if
+    // the error doesn't look lock-related.
+    while (attempt <= 1 + maxRetries) {
       try {
         return await openDB<OpLogDB>(DB_NAME, DB_VERSION, {
           upgrade: (db, oldVersion, _newVersion, transaction) => {
@@ -220,6 +233,14 @@ export class OperationLogStoreService {
       } catch (e) {
         lastError = e;
 
+        // Classify the error on the first failure. If it doesn't look
+        // lock-related, shrink the retry budget so we fail fast and let the
+        // hydrator surface the error instead of hanging for 31s.
+        if (attempt === 1 && !isLockRelatedIdbOpenError(e)) {
+          maxRetries = IDB_OPEN_RETRIES_NON_LOCK;
+        }
+
+        const totalAttempts = 1 + maxRetries;
         if (attempt < totalAttempts) {
           // Exponential backoff: 1s, 2s, 4s, 8s, 16s for retries 1-5
           const delay = IDB_OPEN_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
@@ -229,6 +250,8 @@ export class OperationLogStoreService {
           );
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
+
+        attempt++;
       }
     }
 

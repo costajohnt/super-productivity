@@ -1,15 +1,68 @@
-import { IDB_OPEN_RETRIES, IDB_OPEN_RETRY_BASE_DELAY_MS } from './operation-log.const';
+import {
+  IDB_OPEN_RETRIES,
+  IDB_OPEN_RETRIES_NON_LOCK,
+  IDB_OPEN_RETRY_BASE_DELAY_MS,
+} from './operation-log.const';
+import { isLockRelatedIdbOpenError } from '../persistence/op-log-errors.const';
 
 describe('IndexedDB open retry configuration', () => {
-  it('should have a total retry window of at least 20 seconds to handle session-restart file locks', () => {
-    // On Linux desktop environments (especially Flatpak), logging out and back
-    // in with autostart can leave the old session's LevelDB lock held for 5-15+
-    // seconds. The retry window must be long enough to outlast this.
-    // See: https://github.com/super-productivity/super-productivity/issues/7191
-    let totalDelayMs = 0;
-    for (let i = 1; i <= IDB_OPEN_RETRIES; i++) {
-      totalDelayMs += IDB_OPEN_RETRY_BASE_DELAY_MS * Math.pow(2, i - 1);
-    }
-    expect(totalDelayMs).toBeGreaterThanOrEqual(20000);
+  // Minimum 20s window exists as a defense-in-depth retry budget for
+  // session-restart LOCK contention on Linux desktop environments
+  // (especially Flatpak), where logout/login with autostart can leave
+  // the old session's LevelDB lock held for 5-15+ seconds.
+  // See: https://github.com/super-productivity/super-productivity/issues/7191
+  const MINIMUM_LOCK_RETRY_WINDOW_MS = 20_000;
+
+  it('lock-related retry window is at least 20 seconds', () => {
+    // Assert against concrete constant values rather than recomputing the
+    // exponential-backoff formula — otherwise the test just checks that the
+    // formula matches itself. We want to fail if someone changes
+    // IDB_OPEN_RETRIES or IDB_OPEN_RETRY_BASE_DELAY_MS below the floor.
+    expect(IDB_OPEN_RETRIES).toBeGreaterThanOrEqual(5);
+    expect(IDB_OPEN_RETRY_BASE_DELAY_MS).toBeGreaterThanOrEqual(1000);
+
+    // Sanity check: the total window implied by those values clears 20s.
+    // With IDB_OPEN_RETRIES=5 and base 1000ms: 1+2+4+8+16 = 31s.
+    const totalDelayMs =
+      (Math.pow(2, IDB_OPEN_RETRIES) - 1) * IDB_OPEN_RETRY_BASE_DELAY_MS;
+    expect(totalDelayMs).toBeGreaterThanOrEqual(MINIMUM_LOCK_RETRY_WINDOW_MS);
+  });
+
+  it('non-lock retry budget is much shorter than the lock budget', () => {
+    // Non-lock errors must fail fast so the hydrator's reload-on-error path
+    // does not create a reload -> wait -> reload loop. See #7191.
+    expect(IDB_OPEN_RETRIES_NON_LOCK).toBeLessThan(IDB_OPEN_RETRIES);
+    // Short window should stay under ~5s so repeated reloads are tolerable.
+    const nonLockWindowMs =
+      (Math.pow(2, IDB_OPEN_RETRIES_NON_LOCK) - 1) * IDB_OPEN_RETRY_BASE_DELAY_MS;
+    expect(nonLockWindowMs).toBeLessThan(5000);
+  });
+});
+
+describe('isLockRelatedIdbOpenError', () => {
+  it('returns true for InvalidStateError (Chrome LevelDB lock signal)', () => {
+    const err = new Error('Internal error.');
+    err.name = 'InvalidStateError';
+    expect(isLockRelatedIdbOpenError(err)).toBe(true);
+  });
+
+  it('returns true when the message mentions "backing store" (any case)', () => {
+    expect(
+      isLockRelatedIdbOpenError(new Error('Internal error opening backing store')),
+    ).toBe(true);
+    expect(isLockRelatedIdbOpenError(new Error('BACKING STORE is locked'))).toBe(true);
+    expect(isLockRelatedIdbOpenError('backing store failure')).toBe(true);
+  });
+
+  it('returns false for generic errors that do not look lock-related', () => {
+    expect(isLockRelatedIdbOpenError(new Error('AbortError'))).toBe(false);
+    expect(
+      isLockRelatedIdbOpenError(
+        Object.assign(new Error('Quota exceeded'), { name: 'QuotaExceededError' }),
+      ),
+    ).toBe(false);
+    expect(isLockRelatedIdbOpenError(undefined)).toBe(false);
+    expect(isLockRelatedIdbOpenError(null)).toBe(false);
+    expect(isLockRelatedIdbOpenError({ random: 'object' })).toBe(false);
   });
 });

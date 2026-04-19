@@ -54,6 +54,36 @@ export const IDB_OPEN_ERROR_MSG =
  */
 export const IDB_BACKING_STORE_PATTERN = 'backing store';
 
+/**
+ * Heuristic: is this IndexedDB open error likely caused by a file lock held
+ * by a previous process/session?
+ *
+ * Used to gate the long (~31s) retry window on errors where waiting might
+ * actually help. Non-lock errors should fail fast so the hydrator's
+ * reload-on-error path (see OperationLogHydratorService._showIndexedDBOpenError)
+ * does not create a reload -> wait 31s -> reload loop that feels like a hang.
+ *
+ * Signals that suggest a lock:
+ * - `InvalidStateError`: Chrome throws this when LevelDB's LOCK file is held.
+ * - "backing store" in the message: backing-store errors on Linux / Electron
+ *   are commonly caused by a stale LevelDB lock from a crashed or prior
+ *   session (see issue #7191).
+ *
+ * @see https://github.com/super-productivity/super-productivity/issues/7191
+ */
+export const isLockRelatedIdbOpenError = (err: unknown): boolean => {
+  if (err instanceof Error) {
+    if (err.name === 'InvalidStateError') {
+      return true;
+    }
+    return err.message.toLowerCase().includes(IDB_BACKING_STORE_PATTERN);
+  }
+  if (typeof err === 'string') {
+    return err.toLowerCase().includes(IDB_BACKING_STORE_PATTERN);
+  }
+  return false;
+};
+
 // ============================================================================
 // Connection Closing Errors (Issue #6643)
 // ============================================================================

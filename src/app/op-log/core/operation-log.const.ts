@@ -277,6 +277,20 @@ export const POST_SYNC_COOLDOWN_MS = 2000;
 export const IDB_OPEN_RETRIES = 5;
 
 /**
+ * Number of retry attempts for IndexedDB open errors that do NOT look like
+ * session-restart file locks (e.g. generic `AbortError`, `UnknownError`).
+ *
+ * The long `IDB_OPEN_RETRIES` window is only useful when waiting for a stale
+ * lock to be released. For any other error, `_ensureInit()` is awaited by
+ * every op-log read/write, and `OperationLogHydratorService` auto-reloads on
+ * failure — so a 31s wait on a non-lock error can create a reload->wait->reload
+ * loop that feels like a hang. Fail fast for those errors instead.
+ *
+ * @see https://github.com/super-productivity/super-productivity/issues/7191
+ */
+export const IDB_OPEN_RETRIES_NON_LOCK = 2;
+
+/**
  * Base delay for IndexedDB open retry exponential backoff (milliseconds).
  * With IDB_OPEN_RETRIES=5: delays are 1s, 2s, 4s, 8s, 16s (~31s total window).
  */
