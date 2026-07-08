@@ -55,7 +55,7 @@
   &.is-active {
     border-color: var(--c-primary);
     background: var(--c-primary);
-    color: var(--text-on-primary, #fff);
+    color: var(--c-contrast);
   }
 
   &.is-past {

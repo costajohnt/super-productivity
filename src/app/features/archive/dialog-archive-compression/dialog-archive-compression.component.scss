@@ -18,11 +18,11 @@
 }
 
 .empty mat-icon {
-  color: var(--success-color, #4caf50);
+  color: var(--color-success);
 }
 
 .error mat-icon {
-  color: var(--warn-color, #f44336);
+  color: var(--color-danger);
 }
 
 .intro {
@@ -78,7 +78,7 @@
   margin-top: 1rem;
   background: rgba(255, 152, 0, 0.1);
   border-radius: var(--card-border-radius);
-  color: var(--warn-color, #ff9800);
+  color: var(--color-warning);
 
   mat-icon {
     flex-shrink: 0;
